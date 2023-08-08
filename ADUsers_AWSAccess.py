@@ -1,0 +1,129 @@
+import json
+import base64
+import logging
+import requests
+import sys
+import time
+from datetime import datetime, timedelta
+import pytz
+
+from base64 import b64encode
+
+logging.basicConfig(filename='sumo-search-job.log', level='INFO', format='%(asctime)s %(levelname)s: %(message)s')
+logging.info('*************STARTING REQUEST*************')
+
+### READ IN ARGUMENTS ###
+# The accessId for the Sumo user
+access_id = 'XXX'
+# The accessKey for the Sumo user
+access_key = 'XXX'
+# The API endoint for your account, e.g. https://api.sumologic.com
+SUMO_API_URL = 'https://api.sumologic.com'
+
+# Calculate time ranges
+current_time = datetime.now(pytz.timezone("America/Chicago"))
+from_time = current_time - timedelta(minutes=2)
+from_time_str = from_time.strftime('%Y-%m-%dT%H:%M:%S')
+to_time_str = current_time.strftime('%Y-%m-%dT%H:%M:%S')
+
+searchJob = {
+    "query": "SUMO QUERY HERE",
+    "from": from_time_str,
+    "to": to_time_str,
+    "timeZone": "CST"
+}
+
+# Convert payload to JSON format
+json_payload = json.dumps(searchJob)
+
+# The API requires some headers be set
+auth_header = f"{access_id}:{access_key}"
+encoded_auth_header = base64.b64encode(auth_header.encode()).decode()
+
+headers = {'Authorization': 'Basic %s' % encoded_auth_header, 'Content-Type': 'application/json', 'Accept': 'application/json'}
+
+# The API is going to send back cookies after you make the first request.  Those cookies are required to further interact, so we use a session to save those cookies.
+session = requests.Session()
+
+# Takes a search job, creates it and returns the ID.
+def executesearchjob(searchjob):
+    logging.info('executing searchjob: ' + json.dumps(searchjob))
+    print('executing searchjob: ' + json.dumps(searchjob))
+    r = session.post(SUMO_API_URL + '/api/v1/search/jobs', data=json_payload, headers=headers)
+    if r.status_code != 202:
+        logging.error('got back status code ' + str(r.status_code))
+        logging.error('unable to execute searchjob! ' + r.text)
+        print('Unable to execute search job! ' + str(r.status_code) + r.text)
+        sys.exit(1)
+    else:
+        response = json.loads(r.text)
+        logging.info('got back response ' + json.dumps(response))
+        return response['id']
+
+# Polls the search job id until it completes.  Check's the status every 5 seconds.
+def pollsearchjob(searchjobid):
+    logging.info('checking status of searchjob: ' + searchjobid)
+    status = ''
+    while status != 'DONE GATHERING RESULTS':
+        r = session.get(SUMO_API_URL + '/api/v1/search/jobs/' + searchjobid)
+        if r.status_code != 200:
+            logging.error('got back status code ' + str(r.status_code))
+            logging.error('unable to check status of searchJob ' + searchjobid + '!')
+            print('unable to check status of searchJob ' + searchjobid + '!')
+            sys.exit(1)
+        else:
+            response = json.loads(r.text)
+            logging.info('got back response for search job id ' + searchjobid + ' ' + json.dumps(response))
+            print('Your search job id is ' + searchjobid)
+            status = response['state']
+            time.sleep(5)
+
+# Saves search job results to a file
+def save_results_to_file(searchjobid):
+    url = f"{SUMO_API_URL}/api/v1/search/jobs/{searchjobid}/messages?offset=0&limit=10000"
+    r = session.get(url)
+    if r.status_code == 200:
+        with open("AWS_AD_Users.txt", "w") as file:
+            file.write(r.text)
+        logging.info("Search job results saved to AWS_AD_Users.txt")
+        print("Search job results saved to AWS_AD_Users.txt")
+    else:
+        logging.error("Unable to retrieve search job results")
+        print("Unable to retrieve search job results")
+
+# Function to extract user.username field from search job results
+def extract_usernames(results):
+    usernames = []
+    logging.info("Extracting usernames from AWS_AD_Users.txt")
+    print("Extracting usernames from AWS_AD_Users.txt")
+    for result in results['messages']:
+        username = result.get('map', {}).get('user.username', '')
+        if username:
+            usernames.append(username)
+    return usernames
+
+# Function to save extracted usernames to a new JSON file
+def save_extracted_usernames(usernames):
+    cst_tz = pytz.timezone("America/Chicago")
+    expiration_time = (datetime.now(pytz.utc) + timedelta(days=1)).astimezone(cst_tz).strftime('%Y-%m-%dT%H:%M:%SZ')
+    items = [{"value": username, "active": True, "expiration": expiration_time} for username in usernames]
+    data = {"items": items}
+    with open("extracted_usernames.json", "w") as file:
+        json.dump(data, file, indent=4)
+    logging.info("Extracted usernames saved to extracted_usernames.json")
+    print("Extracted usernames saved to extracted_usernames.json")
+
+# We create the search job and are given back the ID
+searchJobID = executesearchjob(searchJob)
+
+# We poll the search job every 5 seconds until it is complete, or fails.
+pollsearchjob(searchJobID)
+
+# Save search job results to a file
+save_results_to_file(searchJobID)
+
+# Extract usernames from search job results and save to a new JSON file
+with open("AWS_AD_Users.txt", "r") as file:
+    search_results = json.load(file)
+    extracted_usernames = extract_usernames(search_results)
+    save_extracted_usernames(extracted_usernames)
