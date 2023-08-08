@@ -27,7 +27,7 @@ from_time_str = from_time.strftime('%Y-%m-%dT%H:%M:%S')
 to_time_str = current_time.strftime('%Y-%m-%dT%H:%M:%S')
 
 searchJob = {
-    "query": "SUMO QUERY HERE",
+    "query": "cat path://\"/Library/Admin Recommended/Applications/Lookups/AD User Inventory - AWS Access\"",
     "from": from_time_str,
     "to": to_time_str,
     "timeZone": "CST"
@@ -105,13 +105,43 @@ def extract_usernames(results):
 # Function to save extracted usernames to a new JSON file
 def save_extracted_usernames(usernames):
     cst_tz = pytz.timezone("America/Chicago")
-    expiration_time = (datetime.now(pytz.utc) + timedelta(days=1)).astimezone(cst_tz).strftime('%Y-%m-%dT%H:%M:%SZ')
-    items = [{"value": username, "active": True, "expiration": expiration_time} for username in usernames]
+    expiration_time = (datetime.now(pytz.utc) + timedelta(hours=29)).astimezone(cst_tz).strftime('%Y-%m-%dT%H:%M:%SZ')
+    description = "AWS Users"
+    items = [{"value": username, "active": True, "expiration": expiration_time, "description": description} for username in usernames]
     data = {"items": items}
     with open("extracted_usernames.json", "w") as file:
         json.dump(data, file, indent=4)
     logging.info("Extracted usernames saved to extracted_usernames.json")
     print("Extracted usernames saved to extracted_usernames.json")
+
+# Takes the extracted_usernames.json and posts them to the match list.
+def post_extracted_usernames():
+    with open("extracted_usernames.json", "r") as file:
+        extracted_usernames_data = json.load(file)
+
+    endpoint_url = "https://api.sumologic.com/api/sec/v1/match-lists/28/items"
+
+    auth_header = f"{access_id}:{access_key}"
+    encoded_auth_header = base64.b64encode(auth_header.encode()).decode()
+
+    headers = {
+        'Authorization': 'Basic %s' % encoded_auth_header,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+
+    response = requests.post(endpoint_url, json=extracted_usernames_data, headers=headers)
+
+    if response.status_code == 200:
+        print("Extracted usernames successfully posted to the endpoint.")
+        logging.info("Extracted usernames successfully posted to the endpoint.")
+
+    else:
+        print("Failed to post extracted usernames to the endpoint. Status code:", response.status_code)
+        print("Response:", response.text)
+        logging.info("Failed to post extracted usernames to the endpoint. Status code:", response.status_code)
+        logging.info("Response:", response.text)
+
 
 # We create the search job and are given back the ID
 searchJobID = executesearchjob(searchJob)
@@ -127,3 +157,6 @@ with open("AWS_AD_Users.txt", "r") as file:
     search_results = json.load(file)
     extracted_usernames = extract_usernames(search_results)
     save_extracted_usernames(extracted_usernames)
+
+# Post extracted usernames to specified endpoint
+post_extracted_usernames()
