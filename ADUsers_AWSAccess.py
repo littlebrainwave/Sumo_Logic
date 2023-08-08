@@ -134,7 +134,7 @@ def post_extracted_usernames():
 
     if response.status_code == 200:
         print("Extracted usernames successfully posted to the endpoint.")
-        logging.info("Extracted usernames successfully posted to the endpoint.")
+        logging.info("Extracted usernames successfully posted to the Match List.")
 
     else:
         print("Failed to post extracted usernames to the endpoint. Status code:", response.status_code)
