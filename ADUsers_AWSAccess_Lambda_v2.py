@@ -100,7 +100,7 @@ def lambda_handler(event, context):
             if r.status == 200:
                 with open("/tmp/AWS_AD_Users.txt", "w") as file:
                     file.write(r.data.decode('utf-8'))
-                print("Search job results saved to Contractor_AD_Users.txt")
+                print("Search job results saved to AWS_AD_Users.txt")
             else:
                 print("Unable to retrieve search job results")
         except Exception as e:
@@ -128,13 +128,12 @@ def lambda_handler(event, context):
 
     # Function to post extracted usernames to the specified endpoint
     def post_extracted_usernames():
-        endpoint_url = f"{SUMO_API_URL}/api/sec/v1/entities/bulk-update-criticality"
+        endpoint_url = f"{SUMO_API_URL}/api/sec/v1/match-lists/28/items"
         try:
             with open("/tmp/extracted_usernames.json", "r") as file:
                 extracted_usernames_data = json.load(file)
             headers = {'Authorization': 'Basic %s' % encoded_auth_header, 'Content-Type': 'application/json', 'Accept': 'application/json'}
-            entity_ids = extracted_usernames_data["entityIds"]
-            payload_json = json.dumps(payload)            
+            payload_json = json.dumps(extracted_usernames_data)            
             r = http.request('POST', endpoint_url, body=payload_json.encode(), headers=headers)
             if r.status == 200:
                 print("Extracted usernames successfully posted to the endpoint.")
